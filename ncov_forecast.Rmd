@@ -1,0 +1,82 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(readr)
+library(magrittr)
+library(lubridate)
+library(plotly)
+library(htmlwidgets)
+library(tidyquant)
+library(timetk)
+library(sweep)
+library(geofacet)
+library(ggplot2)
+urlfile_confirmed="https://raw.githubusercontent.com/CSSEGISandData/2019-nCoV/master/time_series/time_series_2019-ncov-Confirmed.csv"
+```
+
+
+## Transform confirmed cases data to tibble
+```{r}
+confirmed <- read_csv(url(urlfile_confirmed))
+colnames(confirmed)[-c(1,2,3,4)] <- as.character(as.Date(names(confirmed)[-c(1,2,3,4)], "%m/%d/%y %H:%M"))
+confirmed <- confirmed[, !duplicated(colnames(confirmed), fromLast = TRUE)]
+confirmed.df <- pivot_longer(confirmed, names(confirmed)[5] : 
+                                      rev(names(confirmed))[1], names_to = "Date")
+confirmed.df$Date <- as.Date(confirmed.df$Date, tz = "UTC")
+colnames(confirmed.df)[c(6)] <- c("Confirmed")
+class(confirmed.df)
+```
+
+## Calculate confirmed.df by date
+
+```{r}
+decdate <- confirmed.df$Date %>% 
+  min() %>% 
+  decimal_date(.)*1000 %>% as.integer(.)/1000
+```
+
+## Calculate total confirmed cases by day worldwide
+
+```{r}
+confirmed.ts <- aggregate(confirmed.df$Confirmed,
+                            by=list(Date=confirmed.df$Date),
+                            FUN=sum, na.rm=TRUE)$x %>%
+    tk_ts(start = decdate, freq = 365 , silent = TRUE)
+```
+
+## Forecast using Auto ARIMA
+
+```{r}
+library(forecast)
+fit2 <- auto.arima(confirmed.ts)
+fit2_forecast <- forecast(fit2, h = 14)
+fit2_sweep <- sw_sweep(fit2_forecast, fitted = TRUE, timekit_idx = TRUE, rename_index = "date")
+fit2_sweep$date <- date_decimal(fit2_sweep$date) %>% format(.,"%b-%d") %>% as.Date(.,"%b-%d")
+new_col <- c("value", "lo.80", "hi.80", "lo.95", "hi.95")
+fit2_sweep[new_col] <- sapply(fit2_sweep[new_col],as.integer)
+print(fit2)
+```
+
+## Plotting forecast along with actual data
+```{r}
+confirmed.plot <- ggplot(fit2_sweep, aes(x = date, y = value, color = key)) +
+  geom_ribbon(aes(ymin = lo.95, ymax = hi.95), 
+                fill = "#eb4034", color = NA, size = 0, alpha = 0.5) +
+    geom_ribbon(aes(ymin = lo.80, ymax = hi.80, fill = key), 
+                fill = "#d9655d", color = NA, size = 0, alpha = 0.5) +
+    # Actual & Forecast
+    geom_line(size = 0.4) + 
+    geom_point(size = 1) +
+    # Aesthetics
+    theme_tq(base_size = 14) +
+    scale_color_tq() +
+    labs(title = "Predicted Cases", x = "Date", y = "Cases")
+
+ggplotly(confirmed.plot)
+```
