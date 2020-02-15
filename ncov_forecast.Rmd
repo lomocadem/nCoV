@@ -17,7 +17,7 @@ library(timetk)
 library(sweep)
 library(geofacet)
 library(ggplot2)
-urlfile_confirmed="https://raw.githubusercontent.com/CSSEGISandData/2019-nCoV/master/time_series/time_series_2019-ncov-Confirmed.csv"
+urlfile_confirmed="https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/archived_data/time_series/time_series_2019-ncov-Confirmed.csv"
 ```
 
 
@@ -50,6 +50,17 @@ confirmed.ts <- aggregate(confirmed.df$Confirmed,
     tk_ts(start = decdate, freq = 365 , silent = TRUE)
 ```
 
+## Perform Augmented Dickey-Fuller test for stationarized data
+
+```{r}
+library(tseries)
+adf.test(confirmed.ts)
+adf.test(diff(confirmed.ts))
+adf.test(diff(diff(confirmed.ts)))
+adf.test(diff(log(confirmed.ts)))
+adf.test(log(confirmed.ts))
+```
+
 ## Forecast using Auto ARIMA
 
 ```{r}
@@ -80,3 +91,36 @@ confirmed.plot <- ggplot(fit2_sweep, aes(x = date, y = value, color = key)) +
 
 ggplotly(confirmed.plot)
 ```
+
+
+## Not satisfied? Let's try order(1,2,1)
+
+```{r}
+library(forecast)
+fit3 <- Arima(confirmed.ts, order=c(1,2,1))
+fit3_forecast <- forecast(fit3, h = 14)
+fit3_sweep <- sw_sweep(fit3_forecast, fitted = TRUE, timekit_idx = TRUE, rename_index = "date")
+fit3_sweep$date <- date_decimal(fit3_sweep$date) %>% format(.,"%b-%d") %>% as.Date(.,"%b-%d")
+new_col <- c("value", "lo.80", "hi.80", "lo.95", "hi.95")
+fit3_sweep[new_col] <- sapply(fit3_sweep[new_col],as.integer)
+print(fit3)
+```
+
+```{r}
+confirmed.plot3 <- ggplot(fit3_sweep, aes(x = date, y = value, color = key)) +
+  geom_ribbon(aes(ymin = lo.95, ymax = hi.95), 
+                fill = "#eb4034", color = NA, size = 0, alpha = 0.5) +
+    geom_ribbon(aes(ymin = lo.80, ymax = hi.80, fill = key), 
+                fill = "#d9655d", color = NA, size = 0, alpha = 0.5) +
+    # Actual & Forecast
+    geom_line(size = 0.4) + 
+    geom_point(size = 1) +
+    # Aesthetics
+    theme_tq(base_size = 14) +
+    scale_color_tq() +
+    labs(title = "Predicted Cases", x = "Date", y = "Cases")
+
+ggplotly(confirmed.plot3)
+```
+
+
